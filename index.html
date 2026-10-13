@@ -1,0 +1,675 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"></head><body><title>Portrait Pose Coach</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=IBM+Plex+Mono:wght@400;500&family=Figtree:wght@400;500;600&display=swap">
+<style>
+/* Layout: one-screen viewfinder — top control strip, camera stage (true frame, letterboxed), coaching panel docked at the bottom. Dark by design, like a camera EVF. */
+:root{
+  --bg:#0d0f0e; --surface:#171a19; --surface-2:#202423; --line:#2e3331;
+  --fg:#eef1ee; --muted:#9aa39f;
+  --accent:#f2d54a;           /* AF-confirm yellow */
+  --good:#5fd38d; --fix:#ff8d5c; --info:#7cb8ff;
+  --f-display:"Bricolage Grotesque", "Avenir Next", system-ui, sans-serif;
+  --f-body:"Figtree", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --f-mono:"IBM Plex Mono", ui-monospace, Menlo, monospace;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;background:var(--bg);color:var(--fg);font-family:var(--f-body);font-size:15px;-webkit-tap-highlight-color:transparent;overflow:hidden}
+button,select{font:inherit;color:inherit}
+button{cursor:pointer}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+#app{height:100%;display:grid;grid-template-rows:auto 1fr auto;max-width:720px;margin:0 auto}
+
+/* top strip */
+.top{display:flex;align-items:center;gap:10px;padding:10px 16px 8px;flex-wrap:wrap}
+.brand{font-family:var(--f-display);font-weight:700;font-size:17px;letter-spacing:-.01em;margin-right:auto;display:flex;align-items:center;gap:8px}
+.brand i{width:10px;height:10px;border:2px solid var(--accent);display:inline-block}
+.seg{display:flex;background:var(--surface);border:1px solid var(--line);border-radius:999px;padding:3px}
+.seg button{border:0;background:transparent;padding:6px 12px;border-radius:999px;font-size:13px;font-weight:600;color:var(--muted)}
+.seg button[aria-pressed="true"]{background:var(--fg);color:var(--bg)}
+.icon-btn{width:38px;height:38px;border-radius:50%;border:1px solid var(--line);background:var(--surface);display:grid;place-items:center;padding:0}
+.icon-btn[aria-pressed="false"]{opacity:.5}
+.icon-btn svg{width:18px;height:18px}
+
+/* stage */
+.stage{position:relative;background:#000;min-height:0;overflow:hidden}
+.stage video,.stage canvas,.stage img.still{position:absolute;inset:0;width:100%;height:100%;object-fit:contain}
+.stage.mirror video,.stage.mirror canvas{transform:scaleX(-1)}
+.hud{position:absolute;left:12px;right:12px;top:10px;display:flex;justify-content:space-between;align-items:flex-start;gap:8px;pointer-events:none;font-family:var(--f-mono);font-size:11px}
+.hud span{background:rgba(0,0,0,.55);padding:4px 8px;border-radius:4px;color:#dfe5e1}
+.flash{position:absolute;inset:0;background:#fff;opacity:0;pointer-events:none;transition:opacity .35s}
+.flash.on{opacity:.8;transition:none}
+.cue{position:absolute;inset:0;display:grid;place-items:center;pointer-events:none}
+.cue svg{width:min(26vw,120px);height:auto;color:var(--accent);filter:drop-shadow(0 2px 8px rgba(0,0,0,.6));opacity:.9;transition:transform .25s}
+.cue[hidden]{display:none}
+
+/* start / message sheet over the stage */
+.sheet{position:absolute;inset:0;background:radial-gradient(120% 80% at 50% 20%,#1d2321 0,#0d0f0e 70%);display:flex;flex-direction:column;justify-content:center;gap:18px;padding:24px 20px;overflow:auto}
+.sheet h1{font-family:var(--f-display);font-weight:700;font-size:clamp(26px,7vw,38px);line-height:1.05;margin:0;text-wrap:balance;letter-spacing:-.02em}
+.sheet p{margin:0;color:var(--muted);max-width:52ch;line-height:1.5}
+.steps{display:grid;gap:8px;margin:0;padding:0;list-style:none;font-size:14px}
+.steps li{display:flex;gap:10px;align-items:baseline}
+.steps b{font-family:var(--f-mono);font-weight:500;color:var(--accent);font-size:12px;min-width:20px}
+.cta{display:flex;gap:10px;flex-wrap:wrap}
+.btn{border:0;border-radius:12px;padding:13px 18px;font-weight:600;background:var(--accent);color:#1b1a10;display:inline-flex;align-items:center;gap:8px}
+.btn.ghost{background:var(--surface-2);color:var(--fg);border:1px solid var(--line)}
+.note{font-size:12.5px;color:var(--muted);font-family:var(--f-mono);line-height:1.5}
+.err{color:var(--fix)}
+
+/* coaching panel */
+.panel{background:var(--surface);border-top:1px solid var(--line);padding:12px 16px calc(12px + env(safe-area-inset-bottom,0px));display:grid;gap:10px}
+.coach{display:grid;grid-template-columns:auto 1fr auto;gap:12px;align-items:center}
+.who{width:44px;height:44px;border-radius:12px;display:grid;place-items:center;background:var(--surface-2);color:var(--accent)}
+.who svg{width:24px;height:24px}
+.who.model{color:var(--info)}
+.who.ok{color:var(--good)}
+.msg{min-width:0}
+.msg small{display:block;font-family:var(--f-mono);font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.msg strong{display:block;font-family:var(--f-display);font-weight:700;font-size:19px;line-height:1.2;text-wrap:balance;margin-top:2px}
+.score{position:relative;width:52px;height:52px}
+.score svg{width:52px;height:52px;transform:rotate(-90deg)}
+.score b{position:absolute;inset:0;display:grid;place-items:center;font-family:var(--f-mono);font-weight:500;font-size:15px;font-variant-numeric:tabular-nums}
+.chips{display:flex;gap:6px;overflow-x:auto;scrollbar-width:none;padding-bottom:2px}
+.chips::-webkit-scrollbar{display:none}
+.chip{flex:none;font-size:12px;padding:4px 9px 4px 7px;border-radius:999px;background:var(--surface-2);color:var(--muted);display:flex;align-items:center;gap:5px;border:1px solid transparent}
+.chip::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--line)}
+.chip.ok{color:var(--fg)} .chip.ok::before{background:var(--good)}
+.chip.fix{color:var(--fg);border-color:rgba(255,141,92,.35)} .chip.fix::before{background:var(--fix)}
+.poses{display:flex;gap:8px;overflow-x:auto;scrollbar-width:none;padding-bottom:2px}
+.poses::-webkit-scrollbar{display:none}
+.pose{flex:none;text-align:left;border:1px solid var(--line);background:var(--bg);border-radius:12px;padding:8px 10px;width:150px;display:grid;gap:2px}
+.pose span{font-weight:600;font-size:13.5px}
+.pose em{font-style:normal;font-size:11.5px;color:var(--muted);line-height:1.35}
+.pose[aria-pressed="true"]{border-color:var(--accent);background:#1f1e12}
+.row{display:flex;align-items:center;gap:8px}
+.row .lbl{font-family:var(--f-mono);font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin-right:auto}
+.toggle{border:1px solid var(--line);background:var(--surface-2);border-radius:999px;padding:6px 11px;font-size:12.5px;font-weight:600;color:var(--muted)}
+.toggle[aria-pressed="true"]{color:var(--fg);border-color:var(--accent)}
+.shots{display:flex;gap:6px;overflow-x:auto;scrollbar-width:none}
+.shots img{height:58px;border-radius:6px;border:1px solid var(--line);flex:none;cursor:pointer}
+.issues{margin:0;padding:0;list-style:none;display:grid;gap:6px;max-height:28vh;overflow:auto}
+.issues li{display:grid;grid-template-columns:auto 1fr;gap:8px;font-size:14px;line-height:1.35}
+.issues li b{font-family:var(--f-mono);font-size:10px;font-weight:500;padding:2px 6px;border-radius:4px;background:var(--surface-2);color:var(--accent);align-self:start;margin-top:2px;text-transform:uppercase;letter-spacing:.06em}
+.issues li b.model{color:var(--info)}
+.viewer{position:fixed;inset:0;background:rgba(0,0,0,.92);display:grid;place-items:center;z-index:5;padding:16px}
+.viewer img{max-height:80vh;border-radius:8px}
+.viewer p{font-family:var(--f-mono);font-size:12px;color:var(--muted);text-align:center}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+
+<div id="app">
+  <div class="top">
+    <div class="brand"><i></i>Pose Coach</div>
+    <div class="seg" role="group" aria-label="Shot type">
+      <button id="shot-head" data-shot="head" aria-pressed="false">Head</button>
+      <button id="shot-half" data-shot="half" aria-pressed="true">Half</button>
+      <button id="shot-full" data-shot="full" aria-pressed="false">Full</button>
+    </div>
+    <button class="icon-btn" id="flip" title="Switch camera" aria-label="Switch camera"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7h3l2-3h8l2 3h3v12H3z"/><path d="M9 13a3 3 0 0 1 5.2-2"/><path d="M15 13a3 3 0 0 1-5.2 2"/><path d="M14 9v2h-2M10 17v-2h2"/></svg></button>
+  </div>
+
+  <div class="stage" id="stage">
+    <video id="video" playsinline muted></video>
+    <img class="still" id="still" alt="Photo being analysed" hidden>
+    <canvas id="overlay"></canvas>
+    <div class="cue" id="cue" hidden></div>
+    <div class="hud"><span id="hud-l">—</span><span id="hud-r">—</span></div>
+    <div class="flash" id="flash"></div>
+
+    <div class="sheet" id="sheet">
+      <h1>Your second pair of eyes for portraits</h1>
+      <p>Point the phone at your model. The coach reads their pose and the frame live, then tells you one thing at a time: where to move the camera, and what to tell the model.</p>
+      <ul class="steps">
+        <li><b>01</b><span>Pick the shot: head, half body or full body.</span></li>
+        <li><b>02</b><span>Follow the yellow cues for the camera, the blue ones for the model.</span></li>
+        <li><b>03</b><span>When everything is green it takes the photo for you.</span></li>
+      </ul>
+      <div class="cta">
+        <button class="btn" id="start"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M3 7h3l2-3h8l2 3h3v12H3z"/><circle cx="12" cy="13" r="3.5"/></svg>Start live coaching</button>
+        <label class="btn ghost" for="photo">Analyse a photo</label>
+        <input id="photo" type="file" accept="image/*" capture="environment" hidden>
+      </div>
+      <p class="note" id="status">Loads a small pose model (~3 MB) on first start. Everything runs on your phone; no images leave it.</p>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="coach">
+      <div class="who" id="who"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="8"/><path d="M12 4v3M12 17v3M4 12h3M17 12h3"/></svg></div>
+      <div class="msg"><small id="msg-who">Waiting</small><strong id="msg">Start the camera to begin</strong></div>
+      <div class="score" title="Shot score"><svg viewBox="0 0 52 52"><circle cx="26" cy="26" r="22" fill="none" stroke="var(--line)" stroke-width="4"/><circle id="ring" cx="26" cy="26" r="22" fill="none" stroke="var(--accent)" stroke-width="4" stroke-linecap="round" stroke-dasharray="138.2" stroke-dashoffset="138.2"/></svg><b id="score">–</b></div>
+    </div>
+    <div class="chips" id="chips"></div>
+    <ul class="issues" id="issues" hidden></ul>
+    <div class="poses" id="poses" aria-label="Target pose"></div>
+    <div class="row">
+      <span class="lbl" id="shots-lbl">Auto shots</span>
+      <button class="toggle" id="t-voice" aria-pressed="true">Voice</button>
+      <button class="toggle" id="t-auto" aria-pressed="true">Auto shutter</button>
+      <button class="toggle" id="t-snap">Snap</button>
+    </div>
+    <div class="shots" id="shots"></div>
+  </div>
+</div>
+
+<div class="viewer" id="viewer" hidden><div><img id="viewer-img" alt="Captured photo"><p>Long-press the photo to save it. Tap anywhere to close.</p></div></div>
+
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5.1675469404/pose.js" crossorigin="anonymous"></script>
+<script>
+(() => {
+"use strict";
+const CDN = "https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5.1675469404/";
+const $ = (id) => document.getElementById(id);
+const video = $("video"), still = $("still"), canvas = $("overlay"), ctx = canvas.getContext("2d");
+const lightCanvas = document.createElement("canvas"); lightCanvas.width = 48; lightCanvas.height = 64;
+const lctx = lightCanvas.getContext("2d", { willReadFrequently: true });
+
+// ---------- state ----------
+const S = {
+  mode: "idle", shot: "half", poseId: "coach", facing: "environment",
+  voice: true, auto: true, tilt: null, ema: {}, shown: null, shownAt: 0,
+  lastSpoken: "", lastSpeakAt: 0, goodSince: 0, lastCapture: 0, busy: false,
+  lm: null, light: null, frame: 0, stream: null, pose: null, fps: 0, lastT: 0,
+};
+try { const s = localStorage.getItem("pc-shot"); if (s) S.shot = s; } catch (e) {}
+
+// ---------- landmarks ----------
+const L = { nose:0, lEye:2, rEye:5, lEar:7, rEar:8, lSh:11, rSh:12, lEl:13, rEl:14, lWr:15, rWr:16, lHip:23, rHip:24, lKn:25, rKn:26, lAn:27, rAn:28, lFt:31, rFt:32, lPi:17, rPi:18, lIx:19, rIx:20, lTh:21, rTh:22 };
+const BONES = [[15,17],[15,19],[15,21],[16,18],[16,20],[16,22],[11,12],[11,13],[13,15],[12,14],[14,16],[11,23],[12,24],[23,24],[23,25],[25,27],[24,26],[26,28],[27,31],[28,32]];
+
+// ---------- poses library ----------
+const POSES = [
+  { id:"coach", name:"Coach me", desc:"General fixes for a flattering pose", shots:["head","half","full"] },
+  { id:"threeq", name:"Three-quarter", desc:"Body turned ~30°, face to camera", shots:["head","half","full"] },
+  { id:"hip", name:"Hand on hip", desc:"One hand on hip, elbow out", shots:["half","full"] },
+  { id:"pocket", name:"Hand in pocket", desc:"Relaxed, one hand in pocket", shots:["half","full"] },
+  { id:"over", name:"Over the shoulder", desc:"Body away, look back to camera", shots:["head","half","full"] },
+  { id:"face", name:"Hand near face", desc:"Fingers lightly at jaw or chin", shots:["head","half"] },
+  { id:"lean", name:"Casual lean", desc:"Upper body leans, weight on one leg", shots:["half","full"] },
+];
+
+// ---------- geometry helpers ----------
+function geo(lm, W, H) {
+  const p = (i) => ({ x: lm[i].x * W, y: lm[i].y * H, z: lm[i].z * W, v: lm[i].visibility ?? 1, nx: lm[i].x, ny: lm[i].y });
+  const mid = (a, b) => ({ x:(a.x+b.x)/2, y:(a.y+b.y)/2, z:(a.z+b.z)/2, v:Math.min(a.v,b.v), nx:(a.nx+b.nx)/2, ny:(a.ny+b.ny)/2 });
+  const d = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+  const ang = (a, b, c) => { const v1 = [a.x-b.x, a.y-b.y], v2 = [c.x-b.x, c.y-b.y]; const cos = (v1[0]*v2[0]+v1[1]*v2[1]) / (Math.hypot(...v1)*Math.hypot(...v2) + 1e-6); return Math.acos(Math.max(-1, Math.min(1, cos))) * 180 / Math.PI; };
+  const g = { W, H, p, mid, d, ang };
+  const P = {}; for (const k in L) P[k] = p(L[k]);
+  g.P = P;
+  g.eye = mid(P.lEye, P.rEye); g.ear = mid(P.lEar, P.rEar);
+  g.sh = mid(P.lSh, P.rSh); g.hip = mid(P.lHip, P.rHip);
+  g.shW = d(P.lSh, P.rSh);
+  g.earW = Math.max(d(P.lEar, P.rEar), 1);
+  g.eyeToSh = Math.max(g.sh.y - g.eye.y, 1);
+  g.headTop = (g.eye.y - g.eyeToSh * 0.62) / H;               // normalized
+  g.hipsVis = P.lHip.v > 0.5 && P.rHip.v > 0.5 && g.hip.ny < 1.02;
+  g.torso = d(g.sh, g.hip);
+  // body turn: depth difference between shoulders vs their horizontal spread
+  g.turnDeg = Math.atan2(Math.abs(P.lSh.z - P.rSh.z), Math.abs(P.lSh.x - P.rSh.x) + 1e-6) * 180 / Math.PI;
+  if (g.hipsVis && g.torso > 0) { const r = g.shW / g.torso; g.turnRatio = r; if (r < 0.62) g.turnDeg = Math.max(g.turnDeg, 35); else if (r > 0.78) g.turnDeg = Math.min(g.turnDeg, 15); }
+  g.yaw = (P.nose.x - g.ear.x) / g.earW;                       // + = nose toward image right
+  g.chin = (P.nose.y - g.ear.y) / g.earW;                      // + = chin down
+  g.eyeRoll = Math.atan2(P.lEye.y - P.rEye.y, P.lEye.x - P.rEye.x) * 180 / Math.PI;
+  g.shRoll = Math.atan2(P.lSh.y - P.rSh.y, P.lSh.x - P.rSh.x) * 180 / Math.PI;
+  const norm = (a) => { let x = Math.abs(a); if (x > 90) x = 180 - x; return x; };
+  g.eyeRoll = norm(g.eyeRoll); g.shRoll = norm(g.shRoll);
+  return g;
+}
+
+// ---------- analysis ----------
+// issue: {id, cat: frame|camera|pose|light, sev 1..3, who: cam|model, text, cue}
+function analyze(lm, W, H, opts) {
+  const issues = [], chips = {};
+  const add = (o) => issues.push(o);
+  const g = geo(lm, W, H), P = g.P;
+  const shot = S.shot, mirror = opts.mirror;
+  const panL = mirror ? "right" : "left", panR = mirror ? "left" : "right";
+  const present = P.nose.v > 0.5 && (P.lSh.v > 0.4 || P.rSh.v > 0.4);
+  if (!present) return { none: true, issues: [{ id:"none", cat:"frame", sev:3, who:"cam", text:"Point the camera at your model", cue:null }], chips:{}, g };
+
+  // ---- framing: vertical extent for the chosen shot
+  let bottom, lo, hi, needLabel;
+  if (shot === "head") { bottom = (g.sh.y + g.eyeToSh * 0.9) / H; lo = 0.66; hi = 0.88; }
+  else if (shot === "half") { const hipY = g.hip.y; const tor = Math.max(hipY - g.sh.y, g.eyeToSh * 2); bottom = (hipY + tor * 0.3) / H; lo = 0.74; hi = 0.92; }
+  else { const feet = Math.max(P.lAn.y, P.rAn.y, P.lFt.y, P.rFt.y); bottom = feet / H + 0.015; lo = 0.76; hi = 0.93; }
+  const top = g.headTop, span = bottom - top;
+  let distOk = true, vertOk = true;
+  if (span > hi + 0.02) { distOk = false; add({ id:"back", cat:"frame", sev:3, who:"cam", text: shot === "full" ? "Step back until the feet are in frame" : "Step back a little", cue:"out" }); }
+  else if (span < lo) { distOk = false; add({ id:"closer", cat:"frame", sev: span < lo - 0.15 ? 3 : 2, who:"cam", text:"Step closer to your model", cue:"in" }); }
+  if (top < 0.015) { vertOk = false; add({ id:"headcut", cat:"frame", sev:3, who:"cam", text:"Head is cut off — tilt the camera up", cue:"up" }); }
+  else if (shot === "full") {
+    if (bottom > 0.995) { vertOk = false; add({ id:"feetcut", cat:"frame", sev:3, who:"cam", text:"Feet are cut off — tilt the camera down", cue:"down" }); }
+    else if (top > 0.16) { vertOk = false; add({ id:"toproom", cat:"frame", sev:2, who:"cam", text:"Too much space above the head — tilt down", cue:"down" }); }
+  } else {
+    const eyeN = g.eye.y / H;
+    if (eyeN < 0.24) { vertOk = false; add({ id:"eyehigh", cat:"frame", sev:2, who:"cam", text:"Tilt the camera up a touch — eyes belong on the upper third line", cue:"up" }); }
+    else if (eyeN > 0.43) { vertOk = false; add({ id:"eyelow", cat:"frame", sev:2, who:"cam", text:"Tilt the camera down — too much empty space above", cue:"down" }); }
+  }
+  chips.Distance = distOk; chips[shot === "full" ? "Headroom" : "Eye line"] = vertOk;
+
+  // ---- horizontal placement with lead room toward the gaze
+  const lookRight = g.yaw > 0.35, lookLeft = g.yaw < -0.35;
+  const cx = (g.sh.nx + P.nose.nx) / 2;
+  let target = 0.5; if (lookRight) target = 0.42; if (lookLeft) target = 0.58;
+  let horzOk = true;
+  if (cx < target - 0.09) { horzOk = false; add({ id:"panl", cat:"frame", sev:2, who:"cam", text:`Pan the camera ${panL}` + (lookRight||lookLeft ? " — leave space in the direction they look" : ""), cue: mirror ? "right" : "left" }); }
+  else if (cx > target + 0.09) { horzOk = false; add({ id:"panr", cat:"frame", sev:2, who:"cam", text:`Pan the camera ${panR}` + (lookRight||lookLeft ? " — leave space in the direction they look" : ""), cue: mirror ? "left" : "right" }); }
+  chips.Centre = horzOk;
+
+  // ---- joint crops (never cut at knees, elbows, wrists, ankles)
+  let cropOk = true;
+  const nearEdgeY = (pt) => pt.ny > 0.955 && pt.ny < 1.045;
+  if (shot !== "full") {
+    const knee = [P.lKn, P.rKn].find(nearEdgeY), elbow = [P.lEl, P.rEl].find(nearEdgeY), wrist = [P.lWr, P.rWr].find(nearEdgeY);
+    if (knee) { cropOk = false; add({ id:"kneecut", cat:"frame", sev:2, who:"cam", text:"Frame edge cuts the knees — tilt up to crop mid-thigh", cue:"up" }); }
+    else if (elbow || wrist) { cropOk = false; add({ id:"armcut", cat:"frame", sev:1, who:"cam", text:`Bottom edge cuts the ${elbow ? "elbow" : "wrist"} — move the frame slightly`, cue: shot === "head" ? "up" : "down" }); }
+  }
+  const sideCut = [P.lWr, P.rWr, P.lEl, P.rEl].some((pt) => pt.v > 0.4 && pt.ny < 1 && (pt.nx < 0.025 || pt.nx > 0.975));
+  if (sideCut) { cropOk = false; add({ id:"sidecut", cat:"frame", sev:1, who:"cam", text:"A hand or elbow touches the side edge — step back slightly", cue:"out" }); }
+  chips.Crop = cropOk;
+
+  // ---- camera level and height (motion sensors, live only)
+  if (S.tilt && !opts.still) {
+    let lvl = true;
+    if (Math.abs(S.tilt.roll) > 4) { lvl = false; add({ id:"roll", cat:"camera", sev:2, who:"cam", text:"Hold the phone straight — it is tilted sideways", cue: S.tilt.roll > 0 ? "rotl" : "rotr" }); }
+    if (S.tilt.pitch < -14) { lvl = false; add({ id:"high", cat:"camera", sev:2, who:"cam", text: shot === "full" ? "Camera is too high — lower it to chest height and hold it level" : "Lower the camera to the model's eye level", cue:"down" }); }
+    else if (S.tilt.pitch > 16) { lvl = false; add({ id:"low", cat:"camera", sev: shot === "full" ? 1 : 2, who:"cam", text: shot === "full" ? "Raise the camera a little and level it" : "Raise the camera to eye level — low angles widen the face", cue:"up" }); }
+    chips.Level = lvl;
+  }
+
+  // ---- pose
+  const before = issues.length;
+  poseChecks(g, add, shot);
+  chips.Pose = issues.length === before;
+  const beforeH = issues.length;
+  handChecks(g, add, shot);
+  chips.Hands = issues.length === beforeH;
+
+  // ---- light
+  if (opts.light) {
+    const { face, frame } = opts.light; let ok = true;
+    if (face < 0.26) { ok = false; add({ id:"dark", cat:"light", sev:2, who:"model", text:"Face is in shadow — turn toward the light or window", cue:null }); }
+    else if (frame - face > 0.22) { ok = false; add({ id:"backlit", cat:"light", sev:2, who:"cam", text:"Backlit — move so the light falls on the model's face", cue:null }); }
+    else if (face > 0.9) { ok = false; add({ id:"blown", cat:"light", sev:1, who:"model", text:"Face is very bright — step into softer light or shade", cue:null }); }
+    chips.Light = ok;
+  }
+  return { issues, chips, g };
+}
+
+function poseChecks(g, add, shot) {
+  const P = g.P, M = "model";
+  const turned = g.turnDeg >= 20, strongTurn = g.turnDeg >= 42;
+  const facingCam = Math.abs(g.yaw) < 0.42;
+  const id = S.poseId;
+  const sideAway = P.lSh.z > P.rSh.z ? "left" : "right"; // shoulder farther from camera
+
+  // universal head & shoulder polish
+  if (g.eyeRoll > 16) add({ id:"headtilt", cat:"pose", sev:1, who:M, text:"Straighten your head a little — just a slight tilt", cue:null });
+  if (g.shRoll > 9 && id !== "lean") add({ id:"shlevel", cat:"pose", sev:1, who:M, text:"Relax your shoulders and drop them down", cue:null });
+  if (g.chin < -0.05) add({ id:"chinup", cat:"pose", sev:2, who:M, text:"Bring your chin slightly down and forward", cue:null });
+  else if (g.chin > 0.75) add({ id:"chindown", cat:"pose", sev:1, who:M, text:"Lift your chin a little", cue:null });
+
+  if (id === "coach" || id === "threeq") {
+    if (!turned) add({ id:"square", cat:"pose", sev:2, who:M, text:"Turn your body about 30° to the side, keep your face toward me", cue:null });
+    if (!facingCam && id === "threeq") add({ id:"faceme", cat:"pose", sev:2, who:M, text:"Turn your face back toward the camera", cue:null });
+  }
+  if (id === "over") {
+    if (!strongTurn) add({ id:"turnmore", cat:"pose", sev:2, who:M, text:"Turn your body further away — almost side-on", cue:null });
+    else if (!(Math.abs(g.yaw) < 0.6)) add({ id:"lookback", cat:"pose", sev:2, who:M, text:"Look back over your shoulder toward the camera", cue:null });
+  }
+
+  if (shot === "head") {
+    if (id === "face") {
+      const wr = [P.lWr, P.rWr].filter((w) => w.v > 0.4);
+      const near = wr.some((w) => w.y > g.eye.y && w.y < g.sh.y + g.eyeToSh * 0.3 && Math.abs(w.x - P.nose.x) < g.earW * 1.4);
+      if (!near) add({ id:"handface", cat:"pose", sev:2, who:M, text:"Bring one hand up lightly to your jaw — fingers relaxed", cue:null });
+    }
+    return;
+  }
+
+  // arms & hands (half/full)
+  const side = (el, sh, hip) => { const t = (el.y - sh.y) / Math.max(hip.y - sh.y, 1); const x = sh.x + (hip.x - sh.x) * Math.max(0, Math.min(1, t)); return Math.abs(el.x - x) / Math.max(g.shW, 1); };
+  const gapL = side(P.lEl, P.lSh, P.lHip), gapR = side(P.rEl, P.rSh, P.rHip);
+  const nearHip = (w, h) => g.d(w, h) < Math.max(g.shW, g.torso * 0.6) * 0.45;
+  const handOnHip = (nearHip(P.lWr, P.lHip) && gapL > 0.35) || (nearHip(P.rWr, P.rHip) && gapR > 0.35);
+  const handLow = (w, h) => w.y > h.y - g.torso * 0.1 && w.y < h.y + g.torso * 0.35 && Math.abs(w.x - h.x) < g.shW * 0.45;
+  const handPocket = handLow(P.lWr, P.lHip) || handLow(P.rWr, P.rHip);
+  const armsStraightDown = g.ang(P.lSh, P.lEl, P.lWr) > 158 && g.ang(P.rSh, P.rEl, P.rWr) > 158 && P.lWr.y > g.hip.y && P.rWr.y > g.hip.y;
+
+  if (id === "hip") {
+    if (!handOnHip) add({ id:"handhip", cat:"pose", sev:2, who:M, text:`Place your ${sideAway === "left" ? "right" : "left"} hand on your hip, elbow pointing out`, cue:null });
+  } else if (id === "pocket") {
+    if (!handPocket) add({ id:"handpocket", cat:"pose", sev:2, who:M, text:"Slide one hand into your pocket, thumb out, arm relaxed", cue:null });
+  } else if (id === "lean") {
+    const lean = g.hipsVis ? Math.abs(g.sh.x - g.hip.x) / Math.max(g.torso, 1) : 0;
+    if (lean < 0.08) add({ id:"leanmore", cat:"pose", sev:2, who:M, text:"Lean your upper body slightly to one side, weight on one leg", cue:null });
+  } else if (id === "face") {
+    const near = [P.lWr, P.rWr].some((w) => w.y < g.sh.y + g.eyeToSh * 0.4 && Math.abs(w.x - P.nose.x) < g.earW * 1.6);
+    if (!near) add({ id:"handface", cat:"pose", sev:2, who:M, text:"Bring one hand up near your jaw — fingers soft, not pressing", cue:null });
+  } else {
+    if (gapL < 0.12 && gapR < 0.12 && P.lEl.y > g.sh.y) add({ id:"arms", cat:"pose", sev:1, who:M, text:"Move your arms slightly away from your body to show your waist", cue:null });
+    if (armsStraightDown && !handPocket) add({ id:"hands", cat:"pose", sev:1, who:M, text:"Give your hands something to do — pocket, hip or holding your jacket", cue:null });
+  }
+
+  if (shot === "full") {
+    const kL = g.ang(P.lHip, P.lKn, P.lAn), kR = g.ang(P.rHip, P.rKn, P.rAn);
+    if (kL > 172 && kR > 172 && P.lAn.v > 0.4 && P.rAn.v > 0.4) add({ id:"knees", cat:"pose", sev:1, who:M, text:"Shift your weight to the back foot and bend the front knee slightly", cue:null });
+  }
+}
+
+// ---------- hand coaching ----------
+function handChecks(g, add, shot) {
+  const P = g.P, M = "model", id = S.poseId;
+  const faceTop = g.eye.y - g.earW * 0.7, faceBot = P.nose.y + g.earW * 0.7;
+  const hands = [["left", P.lWr, P.lIx, P.lPi, P.lEl, "l"], ["right", P.rWr, P.rIx, P.rPi, P.rEl, "r"]];
+  let hidden = 0;
+  for (const [name, wr, ix, pi, el, k] of hands) {
+    const inFrame = wr.ny > 0 && wr.ny < 1 && wr.nx > 0 && wr.nx < 1;
+    if (wr.v < 0.45 || ix.v < 0.35 || !inFrame) { if (el.v > 0.6 && el.ny < 0.95) hidden++; continue; }
+    const tip = { x: (ix.x + pi.x) / 2, y: (ix.y + pi.y) / 2 };
+    const len = Math.hypot(tip.x - wr.x, tip.y - wr.y), span = Math.hypot(ix.x - pi.x, ix.y - pi.y);
+    const over = [ix, tip].some((q) => q.y > faceTop && q.y < faceBot && Math.abs(q.x - P.nose.x) < g.earW * 0.55);
+    if (over) { add({ id:"hface-" + k, cat:"hands", sev:2, who:M, hand:k, text:`Move your ${name} hand off your face — rest your fingers at the jaw line`, cue:null }); continue; }
+    if (len > g.earW * 1.9 && wr.z < g.sh.z - g.shW * 0.4) { add({ id:"hbig-" + k, cat:"hands", sev:2, who:M, hand:k, text:`Pull your ${name} hand back — it's close to the camera and looks too big`, cue:null }); continue; }
+    const raised = wr.y < (g.hipsVis ? g.hip.y : g.sh.y + g.eyeToSh * 2);
+    if (raised && len > 6 && span / len > 0.75) add({ id:"hpalm-" + k, cat:"hands", sev:1, who:M, hand:k, text:`Turn your ${name} hand so its side faces me, not the flat palm`, cue:null });
+    else if (raised && len > 6 && span / len < 0.2 && Math.hypot(P[k + "Th"].x - ix.x, P[k + "Th"].y - ix.y) < len * 0.25) add({ id:"hfist-" + k, cat:"hands", sev:1, who:M, hand:k, text:`Relax your ${name} hand — soft, slightly open fingers`, cue:null });
+  }
+  if (hidden === 2 && shot !== "head" && id !== "pocket") add({ id:"hhidden", cat:"hands", sev:1, who:M, text:"Let your hands show — hidden hands look awkward in the photo", cue:null });
+}
+
+// ---------- smoothing & priority ----------
+const CAT_ORDER = { frame:0, camera:1, light:2, pose:3, hands:4 };
+function smooth(issues) {
+  const seen = new Set(issues.map((i) => i.id));
+  const byId = Object.fromEntries(issues.map((i) => [i.id, i]));
+  for (const id of seen) S.ema[id] = (S.ema[id] ?? 0) * 0.75 + 0.25;
+  for (const id in S.ema) if (!seen.has(id)) { S.ema[id] *= 0.7; if (S.ema[id] < 0.05) delete S.ema[id]; }
+  S.last = { ...(S.last || {}), ...byId };
+  return Object.keys(S.ema).filter((id) => S.ema[id] > 0.55 && S.last[id]).map((id) => S.last[id]);
+}
+function rank(list) { return list.slice().sort((a, b) => (CAT_ORDER[a.cat] - CAT_ORDER[b.cat]) || (b.sev - a.sev)); }
+function scoreOf(list) { const w = { 3:34, 2:16, 1:6 }; return Math.max(0, Math.round(100 - list.reduce((s, i) => s + w[i.sev], 0))); }
+
+// ---------- UI ----------
+const ICON = {
+  cam: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M3 7h3l2-3h8l2 3h3v12H3z"/><circle cx="12" cy="13" r="3.5"/></svg>',
+  model: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="5" r="2.5"/><path d="M12 8v7M8 21l4-6 4 6M6 11l6-2 6 2"/></svg>',
+  ok: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7"/></svg>',
+};
+const CUE = {
+  arrow: '<svg viewBox="0 0 100 100" fill="none" stroke="currentColor" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"><path d="M50 82V20M24 44l26-26 26 26"/></svg>',
+  in: '<svg viewBox="0 0 100 100" fill="none" stroke="currentColor" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"><path d="M14 14l20 20M86 14L66 34M14 86l20-20M86 86L66 66M34 20v14H20M66 20v14h14M34 80V66H20M66 80V66h14"/></svg>',
+  out: '<svg viewBox="0 0 100 100" fill="none" stroke="currentColor" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"><path d="M38 38L16 16M62 38l22-22M38 62L16 84M62 62l22 22M16 32V16h16M84 32V16H68M16 68v16h16M84 68v16H68"/></svg>',
+  rot: '<svg viewBox="0 0 100 100" fill="none" stroke="currentColor" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"><path d="M80 50a30 30 0 1 1-9-21.4"/><path d="M72 12v18H54"/></svg>',
+};
+function showCue(c) {
+  const el = $("cue");
+  if (!c) { el.hidden = true; return; }
+  el.hidden = false;
+  const rot = { up:0, right:90, down:180, left:270 };
+  if (c in rot) { el.innerHTML = CUE.arrow; el.firstChild.style.transform = `rotate(${rot[c]}deg)`; }
+  else if (c === "in" || c === "out") el.innerHTML = CUE[c];
+  else { el.innerHTML = CUE.rot; el.firstChild.style.transform = c === "rotl" ? "scaleX(-1)" : ""; }
+}
+function setCoach(item, score) {
+  const who = $("who");
+  if (!item) {
+    who.className = "who ok"; who.innerHTML = ICON.ok;
+    $("msg-who").textContent = "Looks good"; $("msg").textContent = score >= 85 ? "Hold still — great shot" : "Nearly there";
+    showCue(null);
+  } else {
+    who.className = "who" + (item.who === "model" ? " model" : ""); who.innerHTML = item.who === "model" ? ICON.model : ICON.cam;
+    $("msg-who").textContent = item.who === "model" ? "Tell the model" : (item.cat === "light" ? "Light" : "Move the camera");
+    $("msg").textContent = item.text;
+    showCue(item.who === "cam" ? item.cue : null);
+  }
+  $("score").textContent = score == null ? "–" : score;
+  const ring = $("ring"); ring.style.strokeDashoffset = String(138.2 * (1 - (score ?? 0) / 100));
+  ring.style.stroke = score == null ? "var(--line)" : score >= 85 ? "var(--good)" : score >= 60 ? "var(--accent)" : "var(--fix)";
+}
+function setChips(chips, activeIds) {
+  const order = ["Distance","Eye line","Headroom","Centre","Crop","Level","Pose","Hands","Light"];
+  $("chips").innerHTML = order.filter((k) => k in chips).map((k) => `<span class="chip ${chips[k] ? "ok" : "fix"}">${k}</span>`).join("");
+}
+function renderPoses() {
+  const list = POSES.filter((p) => p.shots.includes(S.shot));
+  if (!list.find((p) => p.id === S.poseId)) S.poseId = "coach";
+  $("poses").innerHTML = list.map((p) => `<button class="pose" id="pose-${p.id}" data-pose="${p.id}" aria-pressed="${p.id === S.poseId}"><span>${p.name}</span><em>${p.desc}</em></button>`).join("");
+}
+function setShot(s) {
+  S.shot = s; try { localStorage.setItem("pc-shot", s); } catch (e) {}
+  document.querySelectorAll(".seg button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.shot === s)));
+  S.ema = {}; renderPoses();
+  if (S.mode === "still") runStill();
+}
+
+// ---------- voice ----------
+function speak(text) {
+  if (!S.voice || !("speechSynthesis" in window)) return;
+  const now = performance.now();
+  if (text === S.lastSpoken && now - S.lastSpeakAt < 9000) return;
+  if (now - S.lastSpeakAt < 2600) return;
+  try { speechSynthesis.cancel(); const u = new SpeechSynthesisUtterance(text.replace(/—/g, ",")); u.rate = 1.03; speechSynthesis.speak(u); } catch (e) {}
+  S.lastSpoken = text; S.lastSpeakAt = now;
+}
+
+// ---------- drawing ----------
+function draw(g, active, still) {
+  const W = canvas.width, H = canvas.height;
+  ctx.clearRect(0, 0, W, H);
+  const lw = Math.max(1.5, W / 360);
+  // thirds
+  ctx.strokeStyle = "rgba(255,255,255,.28)"; ctx.lineWidth = lw * 0.7;
+  ctx.beginPath();
+  for (const f of [1/3, 2/3]) { ctx.moveTo(W*f, 0); ctx.lineTo(W*f, H); ctx.moveTo(0, H*f); ctx.lineTo(W, H*f); }
+  ctx.stroke();
+  // corner brackets (viewfinder)
+  ctx.strokeStyle = "rgba(242,213,74,.9)"; ctx.lineWidth = lw * 1.6; const c = Math.min(W, H) * 0.06, m = lw * 3;
+  ctx.beginPath();
+  [[m,m,1,1],[W-m,m,-1,1],[m,H-m,1,-1],[W-m,H-m,-1,-1]].forEach(([x,y,sx,sy]) => { ctx.moveTo(x, y + sy*c); ctx.lineTo(x, y); ctx.lineTo(x + sx*c, y); });
+  ctx.stroke();
+  if (!g) return;
+  // eye line target band
+  if (S.shot !== "full") { ctx.fillStyle = "rgba(242,213,74,.10)"; ctx.fillRect(0, H*0.26, W, H*0.15); }
+  const bad = new Set(active.filter((i) => i.cat === "pose").length ? [] : []);
+  const P = g.P;
+  const poseOk = !active.some((i) => i.cat === "pose");
+  ctx.lineCap = "round"; ctx.lineWidth = lw * 2.4;
+  ctx.strokeStyle = poseOk ? "rgba(95,211,141,.9)" : "rgba(124,184,255,.9)";
+  ctx.beginPath();
+  for (const [a, b] of BONES) {
+    const A = g.p(a), B = g.p(b);
+    if (A.v < 0.35 || B.v < 0.35) continue;
+    ctx.moveTo(A.x, A.y); ctx.lineTo(B.x, B.y);
+  }
+  ctx.stroke();
+  // joints at the frame edge = red
+  ctx.fillStyle = "#fff";
+  for (const i of [0,11,12,13,14,15,16,23,24,25,26,27,28]) { const q = g.p(i); if (q.v < 0.35) continue; ctx.beginPath(); ctx.arc(q.x, q.y, lw * 2.2, 0, 7); ctx.fill(); }
+  if (active.some((i) => i.id === "kneecut")) { ctx.fillStyle = "#ff8d5c"; [P.lKn, P.rKn].forEach((k) => { ctx.beginPath(); ctx.arc(k.x, Math.min(k.y, H - lw*6), lw * 6, 0, 7); ctx.fill(); }); }
+  // ring the hand that needs fixing
+  for (const it of active) if (it.hand) {
+    const w = it.hand === "l" ? P.lWr : P.rWr, ix = it.hand === "l" ? P.lIx : P.rIx;
+    ctx.strokeStyle = "#ff8d5c"; ctx.lineWidth = lw * 2.4;
+    ctx.beginPath(); ctx.arc((w.x + ix.x) / 2, (w.y + ix.y) / 2, Math.max(g.earW * 0.7, lw * 12), 0, 7); ctx.stroke();
+  }
+  // head top marker + eye line
+  const ht = g.headTop * H;
+  ctx.strokeStyle = active.some((i) => ["headcut","toproom"].includes(i.id)) ? "#ff8d5c" : "rgba(255,255,255,.6)";
+  ctx.setLineDash([lw*4, lw*4]); ctx.lineWidth = lw;
+  ctx.beginPath(); ctx.moveTo(g.eye.x - g.earW*1.2, ht); ctx.lineTo(g.eye.x + g.earW*1.2, ht); ctx.stroke();
+  ctx.setLineDash([]);
+}
+
+// ---------- light sampling ----------
+function sampleLight(src, g) {
+  try {
+    const W = g.W, H = g.H;
+    lctx.drawImage(src, 0, 0, 48, 64);
+    const all = lctx.getImageData(0, 0, 48, 64).data;
+    let s = 0; for (let i = 0; i < all.length; i += 4) s += 0.2126*all[i] + 0.7152*all[i+1] + 0.0722*all[i+2];
+    const frame = s / (all.length / 4) / 255;
+    const r = g.earW * 0.6, cx = g.P.nose.x, cy = g.eye.y + g.earW * 0.25;
+    const x0 = Math.max(0, cx - r), y0 = Math.max(0, cy - r), w = Math.min(W, cx + r) - x0, h = Math.min(H, cy + r) - y0;
+    if (w < 4 || h < 4) return null;
+    lctx.drawImage(src, x0, y0, w, h, 0, 0, 16, 16);
+    const f = lctx.getImageData(0, 0, 16, 16).data;
+    let t = 0; for (let i = 0; i < f.length; i += 4) t += 0.2126*f[i] + 0.7152*f[i+1] + 0.0722*f[i+2];
+    return { frame, face: t / (f.length / 4) / 255 };
+  } catch (e) { return null; }
+}
+
+// ---------- engine ----------
+async function ensureEngine() {
+  if (S.pose) return S.pose;
+  if (typeof Pose === "undefined") throw new Error("The pose library did not load. Check your connection and reload.");
+  // model assets are served next to the page; non-wasm binaries carry a .wasm suffix so the host serves them
+  const pose = new Pose({ locateFile: (f) => f.endsWith(".js") ? CDN + f : f.endsWith(".wasm") ? f : f + ".wasm" });
+  pose.setOptions({ modelComplexity: 0, smoothLandmarks: true, enableSegmentation: false, minDetectionConfidence: 0.5, minTrackingConfidence: 0.5 });
+  pose.onResults(onResults);
+  await pose.initialize();
+  S.pose = pose; return pose;
+}
+
+function onResults(res) {
+  S.busy = false;
+  const src = S.mode === "still" ? still : video;
+  const W = S.mode === "still" ? still.naturalWidth : video.videoWidth, H = S.mode === "still" ? still.naturalHeight : video.videoHeight;
+  if (!W || !H) return;
+  if (canvas.width !== W || canvas.height !== H) { canvas.width = W; canvas.height = H; }
+  const lm = res.poseLandmarks;
+  const isStill = S.mode === "still";
+  if (!lm) {
+    draw(null, [], isStill);
+    if (isStill) { renderStillReport(null); return; }
+    S.ema = {}; setCoach({ who:"cam", cat:"frame", text:"Point the camera at your model", cue:null }, null); $("chips").innerHTML = ""; return;
+  }
+  let light = S.light;
+  const g0 = geo(lm, W, H);
+  if (isStill || S.frame % 6 === 0) light = S.light = sampleLight(src, g0);
+  const r = analyze(lm, W, H, { mirror: S.facing === "user" && !isStill, light, still: isStill });
+  if (isStill) { draw(r.g, r.issues, true); setChips(r.chips); renderStillReport(r); return; }
+  const active = rank(smooth(r.issues));
+  const score = r.none ? null : scoreOf(active);
+  // keep the shown instruction stable for at least 1.4 s unless it is resolved
+  const now = performance.now();
+  let top = active[0] || null;
+  if (S.shown && active.find((i) => i.id === S.shown.id) && now - S.shownAt < 1400) top = active.find((i) => i.id === S.shown.id);
+  if ((top?.id ?? null) !== (S.shown?.id ?? null)) { S.shown = top; S.shownAt = now; if (top) speak(top.text); else speak("Looks great. Hold still."); }
+  setCoach(top, score); setChips(r.chips);
+  draw(r.g, active, false);
+  // auto shutter
+  const ready = score != null && score >= 85 && !active.some((i) => i.sev >= 2);
+  if (ready) { if (!S.goodSince) S.goodSince = now; } else S.goodSince = 0;
+  if (S.auto && ready && now - S.goodSince > 1100 && now - S.lastCapture > 4000) capture();
+}
+
+async function loop() {
+  if (S.mode !== "live") return;
+  const t = performance.now();
+  if (!S.busy && video.readyState >= 2) {
+    S.busy = true; S.frame++;
+    try { await S.pose.send({ image: video }); } catch (e) { S.busy = false; }
+    const dt = performance.now() - t; S.fps = S.fps * 0.9 + (1000 / Math.max(dt, 1)) * 0.1;
+    if (S.frame % 10 === 0) $("hud-l").textContent = `${Math.round(S.fps)} fps · ${S.shot.toUpperCase()}`;
+  }
+  requestAnimationFrame(loop);
+}
+
+// ---------- capture ----------
+function capture() {
+  S.lastCapture = performance.now();
+  const W = video.videoWidth, H = video.videoHeight; if (!W) return;
+  const c = document.createElement("canvas"); c.width = W; c.height = H;
+  const x = c.getContext("2d");
+  if (S.facing === "user") { x.translate(W, 0); x.scale(-1, 1); }
+  x.drawImage(video, 0, 0, W, H);
+  const url = c.toDataURL("image/jpeg", 0.92);
+  const img = document.createElement("img"); img.src = url; img.alt = "Captured shot";
+  img.addEventListener("click", () => { $("viewer-img").src = url; $("viewer").hidden = false; });
+  $("shots").prepend(img);
+  while ($("shots").children.length > 12) $("shots").lastChild.remove();
+  $("shots-lbl").textContent = `Shots · ${$("shots").children.length}`;
+  const fl = $("flash"); fl.classList.add("on"); requestAnimationFrame(() => requestAnimationFrame(() => fl.classList.remove("on")));
+  try { navigator.vibrate && navigator.vibrate(40); } catch (e) {}
+}
+
+// ---------- start live ----------
+async function startLive() {
+  const st = $("status");
+  st.classList.remove("err"); st.textContent = "Starting camera…";
+  if (!navigator.mediaDevices?.getUserMedia) { fail("This browser view cannot open the camera. Use “Analyse a photo”, or open the standalone version over https."); return; }
+  // motion sensors (iOS needs permission from a tap)
+  try { if (typeof DeviceOrientationEvent !== "undefined" && typeof DeviceOrientationEvent.requestPermission === "function") await DeviceOrientationEvent.requestPermission(); } catch (e) {}
+  try {
+    if (S.stream) S.stream.getTracks().forEach((t) => t.stop());
+    S.stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: S.facing, width: { ideal: 1280 }, height: { ideal: 1280 } }, audio: false });
+  } catch (e) { fail("Camera access was blocked here. Allow the camera, or use “Analyse a photo” instead."); return; }
+  video.srcObject = S.stream; await video.play().catch(() => {});
+  $("stage").classList.toggle("mirror", S.facing === "user");
+  st.textContent = "Loading the pose model…";
+  try { await ensureEngine(); } catch (e) { fail("The pose engine could not start in this view (" + (e.message || e) + "). Try “Analyse a photo”, or the standalone version."); return; }
+  still.hidden = true; video.hidden = false; $("issues").hidden = true; $("chips").hidden = false;
+  $("sheet").hidden = true; S.mode = "live"; S.ema = {}; S.shown = null;
+  try { navigator.wakeLock?.request("screen").catch(() => {}); } catch (e) {}
+  $("hud-r").textContent = S.facing === "user" ? "FRONT CAM" : "REAR CAM";
+  setCoach({ who:"cam", cat:"frame", text:"Point the camera at your model", cue:null }, null);
+  loop();
+}
+function fail(msg) { const st = $("status"); st.textContent = msg; st.classList.add("err"); $("sheet").hidden = false; }
+
+// ---------- still photo mode ----------
+async function startStill(file) {
+  const st = $("status"); st.classList.remove("err"); st.textContent = "Loading the pose model…";
+  S.mode = "stillLoading";
+  const url = URL.createObjectURL(file);
+  still.src = url; await still.decode().catch(() => {});
+  try { await ensureEngine(); } catch (e) { fail("The pose engine could not start in this view (" + (e.message || e) + ")."); return; }
+  if (S.stream) { S.stream.getTracks().forEach((t) => t.stop()); S.stream = null; }
+  video.hidden = true; still.hidden = false; $("stage").classList.remove("mirror");
+  $("sheet").hidden = true; S.mode = "still";
+  $("hud-l").textContent = "PHOTO · " + S.shot.toUpperCase(); $("hud-r").textContent = "Tap ‘Snap’ to go live";
+  runStill();
+}
+async function runStill() {
+  if (S.mode !== "still" || !S.pose) return;
+  try { S.pose.reset(); await S.pose.send({ image: still }); } catch (e) { fail("Could not analyse that photo."); }
+}
+function renderStillReport(r) {
+  const ul = $("issues"); ul.hidden = false;
+  if (!r || r.none) { ul.innerHTML = ""; setCoach({ who:"cam", cat:"frame", text:"No person found in this photo", cue:null }, null); return; }
+  const list = rank(r.issues);
+  const score = scoreOf(list);
+  setCoach(list[0] || null, score);
+  ul.innerHTML = list.length ? list.map((i) => `<li><b class="${i.who === "model" ? "model" : ""}">${i.who === "model" ? "Model" : i.cat === "light" ? "Light" : "Camera"}</b><span>${i.text}</span></li>`).join("") : `<li><b>OK</b><span>Framing and pose look good for a ${S.shot === "head" ? "headshot" : S.shot === "half" ? "half-body shot" : "full-body shot"}.</span></li>`;
+}
+
+// ---------- sensors ----------
+window.addEventListener("deviceorientation", (e) => {
+  if (e.beta == null) return;
+  const o = (screen.orientation && screen.orientation.angle) || 0;
+  if (o === 0 || o === 180) S.tilt = { pitch: (e.beta - 90) * (o === 180 ? -1 : 1), roll: e.gamma * (o === 180 ? -1 : 1) };
+  else S.tilt = { pitch: (Math.abs(e.gamma) - 90) * -1, roll: e.beta * (o === 90 ? -1 : 1) };
+  // in portrait: beta 90 = upright. beta < 90 → rear camera points down → pitch negative
+});
+
+// ---------- events ----------
+$("start").addEventListener("click", startLive);
+$("photo").addEventListener("change", (e) => { const f = e.target.files[0]; if (f) startStill(f); e.target.value = ""; });
+document.querySelector(".seg").addEventListener("click", (e) => { const b = e.target.closest("button[data-shot]"); if (b) setShot(b.dataset.shot); });
+$("poses").addEventListener("click", (e) => { const b = e.target.closest("button[data-pose]"); if (!b) return; S.poseId = b.dataset.pose; S.ema = {}; renderPoses(); if (S.mode === "still") runStill(); const p = POSES.find((x) => x.id === S.poseId); if (S.mode === "live" && p.id !== "coach") speak("Next pose: " + p.name + ". " + p.desc); });
+$("flip").addEventListener("click", () => { S.facing = S.facing === "user" ? "environment" : "user"; if (S.mode === "live") startLive(); });
+$("t-voice").addEventListener("click", (e) => { S.voice = !S.voice; e.currentTarget.setAttribute("aria-pressed", String(S.voice)); if (!S.voice) try { speechSynthesis.cancel(); } catch (x) {} });
+$("t-auto").addEventListener("click", (e) => { S.auto = !S.auto; e.currentTarget.setAttribute("aria-pressed", String(S.auto)); });
+$("t-snap").addEventListener("click", () => { if (S.mode === "live") capture(); else startLive(); });
+$("viewer").addEventListener("click", () => { $("viewer").hidden = true; });
+
+setShot(S.shot);
+draw(null, [], false);
+canvas.width = 900; canvas.height = 1200; draw(null, [], false);
+})();
+</script>
+</body></html>
